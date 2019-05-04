@@ -24,4 +24,5 @@ COPY --chown=slither:slither . /home/slither/slither
 WORKDIR /home/slither/slither
 
 RUN python3 setup.py install
+ENV PATH="/home/slither/.local/bin:${PATH}"
 CMD /bin/bash
