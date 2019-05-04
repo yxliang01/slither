@@ -23,6 +23,6 @@ RUN [ "c9b268750506b88fe71371100050e9dd1e7edcf8f69da34d1cd09557ecb24580  /usr/bi
 COPY --chown=slither:slither . /home/slither/slither
 WORKDIR /home/slither/slither
 
-RUN python3 setup.py install
+RUN python3 setup.py install --user
 ENV PATH="/home/slither/.local/bin:${PATH}"
 CMD /bin/bash
