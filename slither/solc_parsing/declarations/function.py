@@ -27,6 +27,7 @@ from slither.utils.utils import unroll
 from slither.visitors.expression.export_values import ExportValues
 from slither.visitors.expression.has_conditional import HasConditional
 from slither.solc_parsing.exceptions import ParsingError
+from slither.core.source_mapping.source_mapping import SourceMapping
 
 logger = logging.getLogger("FunctionSolc")
 
@@ -35,9 +36,10 @@ class FunctionSolc(Function):
     """
     # elems = [(type, name)]
 
-    def __init__(self, function, contract):
+    def __init__(self, function, contract, contract_declarer):
         super(FunctionSolc, self).__init__()
         self._contract = contract
+        self._contract_declarer = contract_declarer
 
         # Only present if compact AST
         self._referenced_declaration = None
@@ -254,7 +256,7 @@ class FunctionSolc(Function):
             condition = ifStatement['condition']
             # Note: check if the expression could be directly
             # parsed here
-            condition_node = self._new_node(NodeType.IF, ifStatement['src'])
+            condition_node = self._new_node(NodeType.IF, condition['src'])
             condition_node.add_unparsed_expression(condition)
             link_nodes(node, condition_node)
             trueStatement = self._parse_statement(ifStatement['trueBody'], condition_node)
@@ -265,7 +267,7 @@ class FunctionSolc(Function):
             condition = children[0]
             # Note: check if the expression could be directly
             # parsed here
-            condition_node = self._new_node(NodeType.IF, ifStatement['src'])
+            condition_node = self._new_node(NodeType.IF, condition['src'])
             condition_node.add_unparsed_expression(condition)
             link_nodes(node, condition_node)
             trueStatement = self._parse_statement(children[1], condition_node)
@@ -285,14 +287,15 @@ class FunctionSolc(Function):
         # WhileStatement = 'while' '(' Expression ')' Statement
 
         node_startWhile = self._new_node(NodeType.STARTLOOP, whileStatement['src'])
-        node_condition = self._new_node(NodeType.IFLOOP, whileStatement['src'])
 
         if self.is_compact_ast:
+            node_condition = self._new_node(NodeType.IFLOOP, whileStatement['condition']['src'])
             node_condition.add_unparsed_expression(whileStatement['condition'])
             statement = self._parse_statement(whileStatement['body'], node_condition)
         else:
             children = whileStatement[self.get_children('children')]
             expression = children[0]
+            node_condition = self._new_node(NodeType.IFLOOP, expression['src'])
             node_condition.add_unparsed_expression(expression)
             statement = self._parse_statement(children[1], node_condition)
 
@@ -321,7 +324,7 @@ class FunctionSolc(Function):
             link_nodes(node, node_startLoop)
 
         if condition:
-            node_condition = self._new_node(NodeType.IFLOOP, statement['src'])
+            node_condition = self._new_node(NodeType.IFLOOP, condition['src'])
             node_condition.add_unparsed_expression(condition)
             link_nodes(node_startLoop, node_condition)
             link_nodes(node_condition, node_endLoop)
@@ -415,9 +418,9 @@ class FunctionSolc(Function):
             if candidate[self.get_key()] not in ['VariableDefinitionStatement',
                                          'VariableDeclarationStatement',
                                          'ExpressionStatement']:
-                node_condition = self._new_node(NodeType.IFLOOP, statement['src'])
-                #expression = parse_expression(candidate, self)
                 expression = candidate
+                node_condition = self._new_node(NodeType.IFLOOP, expression['src'])
+                #expression = parse_expression(candidate, self)
                 node_condition.add_unparsed_expression(expression)
                 link_nodes(node_startLoop, node_condition)
                 link_nodes(node_condition, node_endLoop)
@@ -446,15 +449,16 @@ class FunctionSolc(Function):
     def _parse_dowhile(self, doWhilestatement, node):
 
         node_startDoWhile = self._new_node(NodeType.STARTLOOP, doWhilestatement['src'])
-        node_condition = self._new_node(NodeType.IFLOOP, doWhilestatement['src'])
 
         if self.is_compact_ast:
+            node_condition = self._new_node(NodeType.IFLOOP, doWhilestatement['condition']['src'])
             node_condition.add_unparsed_expression(doWhilestatement['condition'])
             statement = self._parse_statement(doWhilestatement['body'], node_condition)
         else:
             children = doWhilestatement[self.get_children('children')]
             # same order in the AST as while
             expression = children[0]
+            node_condition = self._new_node(NodeType.IFLOOP, expression['src'])
             node_condition.add_unparsed_expression(expression)
             statement = self._parse_statement(children[1], node_condition)
 
@@ -835,6 +839,9 @@ class FunctionSolc(Function):
     def _parse_params(self, params):
         assert params[self.get_key()] == 'ParameterList'
 
+        self.parameters_src = SourceMapping()
+        self.parameters_src.set_offset(params['src'], self.contract.slither)
+        
         if self.is_compact_ast:
             params = params['parameters']
         else:
@@ -860,6 +867,9 @@ class FunctionSolc(Function):
 
         assert returns[self.get_key()] == 'ParameterList'
 
+        self.returns_src = SourceMapping()
+        self.returns_src.set_offset(returns['src'], self.contract.slither)
+        
         if self.is_compact_ast:
             returns = returns['parameters']
         else:
@@ -956,7 +966,8 @@ class FunctionSolc(Function):
                 if has_cond.result():
                     st = SplitTernaryExpression(node.expression)
                     condition = st.condition
-                    assert condition
+                    if not condition:
+                        raise ParsingError(f'Incorrect ternary conversion {node.expression} {node.source_mapping_str}')
                     true_expr = st.true_expression
                     false_expr = st.false_expression
                     self.split_ternary_node(node, condition, true_expr, false_expr)
